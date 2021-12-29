@@ -1,2 +1,4 @@
 *.plt
 *.gif
+
+!demo/*

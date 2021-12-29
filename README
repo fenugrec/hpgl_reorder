@@ -1,0 +1,30 @@
+HP-GL plot file re-sequencer
+
+Crude tool to change the order in which HPGL plots are drawn.
+Currently hardcoded to work with HP 4195A outputs which draws the grid on top of signal traces !
+
+Eventually could take an arg in hp2xx style : '-r PPPPPP'
+where each P is a digit 1-9 to specify the ordering.
+
+
+(c) fenugrec 2021
+GPLv3
+
+typical HP 4195A PLT :
+
+SP5 for green comments/text
+SP3 grey text
+SP1 yellow text ?
+SP2 cyan text ?
+SP4 white text
+SP1 yellow trace
+SP2 cyan trace
+SP3 grey graticule
+SP0 terminator
+
+so we output SP1 and SP2 last.
+
+
+## example usage:
+`./reorder -f orig.plt -o better.plt `
+

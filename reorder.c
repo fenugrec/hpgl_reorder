@@ -116,7 +116,7 @@ struct pen_chunk *find_chunks(const u8 *src, unsigned len) {
 		goto badchunks;
 	}
 	//compute length for last chunk
-	pchunks[num_chunks].len = len - pchunks[num_chunks].start;
+	pchunks[num_chunks - 1].len = len - pchunks[num_chunks - 1].start;
 
 	return pchunks;
 

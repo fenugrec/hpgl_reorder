@@ -163,7 +163,7 @@ static void reorder(FILE *ifile, FILE *outf) {
 	}
 	unsigned hdr_len = pchunks[0].start;
 	if (fwrite(src, 1, hdr_len, outf) !=  hdr_len) {
-		printf("fwrite err\n");
+		printf("hdr: fwrite err\n");
 		goto freebufs;
 	}
 
@@ -185,7 +185,7 @@ static void reorder(FILE *ifile, FILE *outf) {
 		start = pchunks[idx].start;
 		clen = pchunks[idx].len;
 		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
-			printf("fwrite err\n");
+			printf("SPx: fwrite err\n");
 			goto freebufs;
 		}
 		printf("wrote %u bytes of SP%u\n", clen, pen);
@@ -206,7 +206,7 @@ static void reorder(FILE *ifile, FILE *outf) {
 		start = pchunks[idx].start;
 		clen = pchunks[idx].len;
 		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
-			printf("fwrite err\n");
+			printf("SPy: fwrite err\n");
 			goto freebufs;
 		}
 		printf("wrote %u bytes of SP%u\n", clen, pen);
@@ -226,7 +226,7 @@ static void reorder(FILE *ifile, FILE *outf) {
 		start = pchunks[idx].start;
 		clen = pchunks[idx].len;
 		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
-			printf("fwrite err\n");
+			printf("SP0: fwrite err\n");
 			goto freebufs;
 		}
 		printf("wrote %u bytes of SP%u\n", clen, pen);
@@ -241,38 +241,34 @@ freebufs:
 
 /********* main stuff (options etc) *******************/
 
-static struct option long_options[] = {
-	{ "file", required_argument, 0, 'f' },
-	{ "out", required_argument, 0, 'o' },
-	{ "help", no_argument, 0, 'h' },
-	{ NULL, 0, 0, 0 }
-};
-
 static void usage(void)
 {
 	fprintf(stderr, "usage:\n"
-		"--file   \t-f <filename>\tbinary ROM dump\n"
-		"--out    \t-o <filename>\toutput file name\n"
+		"reorder <in_file> <out_file>\n"
+		"Or specify filenames explicitly with\n"
+		"\t-i <filename>\tinput PLT file\n"
+		"\t-o <filename>\toutput PLT file\n"
 		"");
 }
 
 
 int main(int argc, char * argv[]) {
 	char c;
-	int optidx;
+	int index;
 	FILE *ifile = NULL;
 	FILE *ofile = NULL;
 
 	printf(	"**** %s\n"
 		"**** (c) 2021 fenugrec\n", argv[0]);
 
-	while((c = getopt_long(argc, argv, "f:o:h",
-			       long_options, &optidx)) != -1) {
+	while((c = getopt(argc, argv, "i:o:h")) != -1) {
 		switch(c) {
+		case '?':
+			//fallthrough
 		case 'h':
 			usage();
-			return 0;
-		case 'f':
+			goto goodexit;
+		case 'i':
 			if (ifile) {
 				fprintf(stderr, "-f given twice");
 				goto bad_exit;
@@ -299,20 +295,49 @@ int main(int argc, char * argv[]) {
 			goto bad_exit;
 		}
 	}
+
+	if (optind < 1) {
+		usage();
+		goto bad_exit;
+	}
+
+	//second loop for non-option args
+	for (index = optind; index < argc; index++) {
+		if (!ifile) {
+			ifile = fopen(argv[index], "rb");
+			if (!ifile) {
+				fprintf(stderr, "fopen() failed: %s\n", strerror(errno));
+				goto bad_exit;
+			}
+			continue;
+		}
+		if (!ofile) {
+			ofile = fopen(argv[index], "wb");
+			if (!ofile) {
+				fprintf(stderr, "fopen() failed: %s\n", strerror(errno));
+				goto bad_exit;
+			}
+			continue;
+		}
+		fprintf(stderr, "junk argument\n");
+		goto bad_exit;
+	}
+
 	if (!ifile || !ofile) {
 		printf("some missing args.\n");
 		usage();
 		goto bad_exit;
 	}
 
-	if (optind <= 1) {
-		usage();
-		goto bad_exit;
-	}
-
 	reorder(ifile, ofile);
-	fclose(ifile);
-	fclose(ofile);
+
+goodexit:
+	if (ifile) {
+		fclose(ifile);
+	}
+	if (ofile) {
+		fclose(ofile);
+	}
 	return 0;
 
 bad_exit:

@@ -22,9 +22,9 @@ SP2 cyan trace
 SP3 grey graticule
 SP0 terminator
 
-so we output SP1 and SP2 last.
+so we just need to output almost everything and save SP1, SP2 and then SP0 for last.
 
 
 ## example usage:
-`./reorder -f orig.plt -o better.plt `
+`./reorder orig.plt better.plt `
 

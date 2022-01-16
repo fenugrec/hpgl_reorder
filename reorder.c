@@ -71,7 +71,7 @@ struct pen_chunk {
  */
 struct pen_chunk *find_chunks(const u8 *src, unsigned len) {
 	// Find "SP" opcodes and grow array every occurence.
-	// we'll still emit a chunk with pen_0 to mark end of array
+	// we'll make sure to emit a chunk with pen_0 to mark end of array
 	unsigned num_chunks = 0;	//# of chunks
 
 	struct pen_chunk *pchunks = calloc(MAX_CHUNKS, sizeof(struct pen_chunk));
@@ -87,13 +87,21 @@ struct pen_chunk *find_chunks(const u8 *src, unsigned len) {
 		}
 		//found one. src[idx] is the leading 'S'
 		//so src[idx + 2] == pen_no
-		if (!isdigit(src[idx+2])) {
+
+		char digit = src[idx + 2];
+		unsigned pen;
+		if (digit == ';') {
+			//special case: "SP;" which is equivalent to SP0.
+			//this is sometimes found in the header; not sure if ever happens mid-stream?
+			//just skip it
+			continue;
+		}
+		if (!isdigit(digit)) {
 			printf("bad SP opcode ! in '%.*s'\n", OPCODE_LEN, (const char *) &src[idx]);
 			goto badchunks;
 		}
+		pen = digit - '0';
 
-		unsigned pen;
-		pen = src[idx+2] - '0';
 		pchunks[num_chunks].pen = pen;
 		pchunks[num_chunks].start = idx;
 		if (num_chunks > 0) {

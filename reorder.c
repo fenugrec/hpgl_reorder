@@ -137,9 +137,13 @@ badchunks:
  * @param pen : 0 to MAX_PEN
  *
  * @return 1 if ok
+ *
+ * This also appends a 'PU' instruction at the end of each chunk
  */
 static bool lift_chunk(FILE *outf, const u8 *src, const struct pen_chunk *pchunks, unsigned pen) {
 	unsigned idx;
+	const char *pu_opcode="PU;";
+
 	for (idx=0; idx < MAX_CHUNKS; idx++) {
 		if (pchunks[idx].len == 0) {
 			//done
@@ -155,6 +159,10 @@ static bool lift_chunk(FILE *outf, const u8 *src, const struct pen_chunk *pchunk
 		clen = pchunks[idx].len;
 		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
 			printf("SPx: fwrite err\n");
+			return 0;
+		}
+		if (fwrite(pu_opcode, 1, sizeof(pu_opcode), outf) !=  sizeof(pu_opcode)) {
+			printf("PU: fwrite err\n");
 			return 0;
 		}
 		printf("wrote %u bytes of SP%u\n", clen, pen);

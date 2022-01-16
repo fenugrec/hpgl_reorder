@@ -27,7 +27,9 @@ For slightly more convenient usage, there is an alternate way of specifying orde
 
 
 ## example usage:
+
 `./reorder orig.plt better.plt`
+
 `./reorder tds_acq.plt tds_nice.plt -l 3`
 
 

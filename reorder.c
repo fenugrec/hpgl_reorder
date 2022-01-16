@@ -2,19 +2,11 @@
  * (c) fenugrec 2021-2022
  * GPLv3
  *
- * typical HP 4195A PLT :
- * SP5 for green comments/text
- * SP3 grey text
- * SP1 yellow text ?
- * SP2 cyan text ?
- * SP4 white text
- * SP1 yellow trace
- * SP2 cyan trace
- * SP3 grey graticule
+ * See README
  *
- * This will default to drawing 3,4,5,6,7,1,2, in that order.
- * Optional arg in hp2xx style : '-r PPPP...' where each P
- * is a digit 1-7. Last digits drawn last, on top.
+ * This will default to drawing 3,4,5,6,7,1,2 (last pens on top)
+ *
+ * Reference for HPGL opcodes:https://www.isoplotec.co.jp/HPGL/eHPGL.htm
  */
 
 
@@ -35,8 +27,10 @@
 
 #define ARRAY_SIZE(x)	(sizeof(x) / sizeof((x)[0]))
 
-#define MAX_PEN	7	//SP0 to SP7 are valid pen
-#define MAX_CHUNKS 20	//any more than this is suspicious
+#define MAX_PEN	7U	//SP0 to SP7 are valid pen
+#define INVALID_PEN (MAX_PEN + 1)
+
+#define MAX_CHUNKS 20U	//any more than this is suspicious
 #define OPCODE_LEN 3	//"SPn"
 
 const unsigned default_order[] = {3,4,5,6,7,1,2,0};	//good for HP 4195A
@@ -253,28 +247,122 @@ freebufs:
 static void usage(void)
 {
 	fprintf(stderr, "usage:\n"
-		"reorder <in_file> <out_file> [-r PPP...]\n"
+		"reorder <in_file> <out_file> [-l PPPP... | -r PPP...]\n"
 		"Or specify filenames explicitly with\n"
 		"\t-i <filename>\tinput PLT file\n"
 		"\t-o <filename>\toutput PLT file\n"
-		"Optional argument -r to specify pen ordering; default 3456712.\n"
-		"e.g. \"-r 3412\" will output pens 3,4,1,2, with pen 2 last (on top).\n"
-		"");
+		"Optional arguments:\n"
+		"\t-r to specify pen ordering; default 3456712.\n"
+		"\te.g. \"-r 3412\" will output pens 3,4,1,2, with pen 2 last (on top).\n"
+		"\n"
+		"\t-l to specify the top layer pens (i.e. first digit printed last);\n"
+		"\tall other unlisted pens will be output first.\n"
+		"\tE.g. \"-l 21\" is equivalent to \"-r 3456712\".\n"
+		"Either -r or -l may be given, not both.\n");
 }
 
+//return pen # if char is within {1, MAX_PEN}, otherwise INVALID_PEN
+static unsigned validate_pen(const char c) {
+	if (!isdigit(c)) {
+		fprintf(stderr, "bad pen number, not a digit\n");
+		return INVALID_PEN;
+	}
+	unsigned digit = c - '0';
+	if (digit > MAX_PEN) {
+		fprintf(stderr, "bad pen number %u > %u\n", digit, MAX_PEN);
+		return INVALID_PEN;
+	}
+	if (digit == 0) {
+		fprintf(stderr, "do not specify pen 0 (last pen)\n");
+		return INVALID_PEN;
+	}
+	return digit;
+}
+
+/** helper to parse & validate '-r PPPP...' argument
+ *
+ * @param neworder : dest array (caller provided)
+ *
+ * @return 1 if ok
+ */
+static bool parse_fullsequence(const char *arg, unsigned *neworder) {
+	//parse something like "456712" => {4,5,6,7,1,2,0} (append 0 if missing)
+	unsigned cur;
+	unsigned order_idx = 0;
+
+	for (cur=0; arg[cur] != 0; cur++) {
+		if (order_idx == MAX_PEN) {
+			fprintf(stderr, "too many pens !\n");
+			return 0;
+		}
+		unsigned digit = validate_pen(arg[cur]);
+		if (digit == INVALID_PEN) {
+			return 0;
+		}
+		neworder[order_idx++] = digit;
+		//we'll check for dupes etc later
+	}
+	//ensure 0 pen at the end
+	neworder[order_idx] = 0;
+	return 1;
+}
+
+/** helper to parse & validate '-l PPPP...' argument
+ *
+ * @param neworder : dest array (caller provided)
+ *
+ * @return 1 if ok
+ */
+static bool parse_lastsequence(const char *arg, unsigned *neworder) {
+	//parse something like "21" => {3,4,5,6,7,1,2,0} (append 0 if missing)
+	unsigned cur;
+	unsigned order_idx = MAX_PEN;
+	bool checklist[MAX_PEN+1] = {0};	//i.e. checklist[1] for pen 1
+
+	//first : copy the given pens to the end of the array
+
+	for (cur=0; arg[cur] != 0; cur++) {
+		if (order_idx == 0) {
+			fprintf(stderr, "too many pens !\n");
+			return 0;
+		}
+		unsigned digit = validate_pen(arg[cur]);
+		if (digit == INVALID_PEN) {
+			return 0;
+		}
+		order_idx -= 1;
+		neworder[order_idx] = digit;
+		checklist[digit] = 1;
+		//we'll check for dupes etc later
+	}
+
+	//next: fill in remaining unspecified pens
+	order_idx = 0;
+	for (cur = 1; cur <= MAX_PEN; cur++) {
+		if (checklist[cur]) {
+			//was manually specified
+			continue;
+		}
+		neworder[order_idx++] = cur;
+		checklist[cur] = 1;
+	}
+	//ensure 0 pen at the end
+	neworder[MAX_PEN] = 0;
+	return 1;
+}
 
 int main(int argc, char * argv[]) {
 	char c;
-	int index;
+	int idx;
 	FILE *ifile = NULL;
 	FILE *ofile = NULL;
 	unsigned ordering[MAX_PEN + 1];
-	unsigned order_idx = 0;
+	bool order_given = 0;
 
 	printf(	"**** %s\n"
 		"**** (c) 2021 fenugrec\n", argv[0]);
 
-	while((c = getopt(argc, argv, "i:o:r:h")) != -1) {
+	while((c = getopt(argc, argv, "i:o:r:l:h")) != -1) {
 		switch(c) {
 		case '?':
 			//fallthrough
@@ -294,7 +382,7 @@ int main(int argc, char * argv[]) {
 			break;
 		case 'o':
 			if (ofile) {
-				fprintf(stderr, "-o given twice");
+				fprintf(stderr, "-o given twice\n");
 				goto bad_exit;
 			}
 			ofile = fopen(optarg, "wb");
@@ -303,35 +391,24 @@ int main(int argc, char * argv[]) {
 				goto bad_exit;
 			}
 			break;
-		case 'r':
-			{
-			//parse something like "456712" => {4,5,6,7,1,2,0} (append 0 if missing)
-			unsigned cur;
-			for (cur=0; optarg[cur] != 0; cur++) {
-				if (order_idx == MAX_PEN) {
-					fprintf(stderr, "too many pens !\n");
-					goto bad_exit;
-				}
-				if (!isdigit(optarg[cur])) {
-					fprintf(stderr, "bad pen number, not a digit\n");
-					goto bad_exit;
-				}
-				unsigned digit = optarg[cur] - '0';
-				if (digit > MAX_PEN) {
-					fprintf(stderr, "bad pen number %u > %u\n", digit, MAX_PEN);
-					goto bad_exit;
-				}
-				if (digit == 0) {
-					fprintf(stderr, "do not specify pen 0 (last pen)\n");
-					goto bad_exit;
-				}
-				ordering[order_idx++] = digit;
-				//we'll check for dupes etc later
+		case 'l':
+			if (order_given) {
+				fprintf(stderr, "cannot have -r and -l\n");
 			}
-			//ensure 0 pen at the end
-			ordering[order_idx] = 0;
+			if (!parse_lastsequence(optarg, ordering)) {
+				goto bad_exit;
+			}
+			order_given = 1;
 			break;
+		case 'r':
+			if (order_given) {
+				fprintf(stderr, "cannot have -r and -l\n");
 			}
+			if (!parse_fullsequence(optarg, ordering)) {
+				goto bad_exit;
+			}
+			order_given = 1;
+			break;
 		default:
 			usage();
 			goto bad_exit;
@@ -344,9 +421,9 @@ int main(int argc, char * argv[]) {
 	}
 
 	//second loop for non-option args
-	for (index = optind; index < argc; index++) {
+	for (idx = optind; idx < argc; idx++) {
 		if (!ifile) {
-			ifile = fopen(argv[index], "rb");
+			ifile = fopen(argv[idx], "rb");
 			if (!ifile) {
 				fprintf(stderr, "fopen() failed: %s\n", strerror(errno));
 				goto bad_exit;
@@ -354,7 +431,7 @@ int main(int argc, char * argv[]) {
 			continue;
 		}
 		if (!ofile) {
-			ofile = fopen(argv[index], "wb");
+			ofile = fopen(argv[idx], "wb");
 			if (!ofile) {
 				fprintf(stderr, "fopen() failed: %s\n", strerror(errno));
 				goto bad_exit;
@@ -372,8 +449,7 @@ int main(int argc, char * argv[]) {
 	}
 
 	const unsigned *neworder = default_order;
-	if (order_idx > 0) {
-		// an ordering was specified : use that
+	if (order_given) {
 		neworder = ordering;
 	}
 	reorder(ifile, ofile, neworder);
@@ -396,4 +472,3 @@ bad_exit:
 	}
 	return 1;
 }
-

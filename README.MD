@@ -23,9 +23,12 @@ SP0 terminator (empty)
 By default this tool will reorder pens in the hardcoded order "3,4,5,6,7,1,2" , but this can be changed with an optional argument of the form `-r PPP...`) where each P is a digit 1-9 to specify the pen ordering.
 For example, `-r 3456712` is equivalent to default behaviour. Any pen number not listed will not be drawn.
 
+For slightly more convenient usage, there is an alternate way of specifying ordering, by giving which pens should be on top. So `-l 21` would output all pens (3,4,5,6,7), then 1 and 2 last (on top).
+
 
 ## example usage:
-`./reorder orig.plt better.plt `
+`./reorder orig.plt better.plt`
+`./reorder tds_acq.plt tds_nice.plt -l 3`
 
 
 Licensed under GPLv3.

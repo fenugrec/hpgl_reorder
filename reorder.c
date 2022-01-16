@@ -1,5 +1,5 @@
 /*
- * (c) fenugrec 2021
+ * (c) fenugrec 2021-2022
  * GPLv3
  *
  * typical HP 4195A PLT :
@@ -12,15 +12,16 @@
  * SP2 cyan trace
  * SP3 grey graticule
  *
- * hardcoded to output SP1 and SP2 last.
- * Eventually could take an arg in hp2xx style : '-r PPPPPP'
- * where each P is a digit 1-9 to specify the ordering.
+ * This will default to drawing 3,4,5,6,7,1,2, in that order.
+ * Optional arg in hp2xx style : '-r PPPP...' where each P
+ * is a digit 1-7. Last digits drawn last, on top.
  */
 
 
 #include <errno.h>
 #include <ctype.h>	//for isdigit()
 #include <limits.h> //UINT_MAX
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -34,8 +35,11 @@
 
 #define ARRAY_SIZE(x)	(sizeof(x) / sizeof((x)[0]))
 
+#define MAX_PEN	7	//SP0 to SP7 are valid pen
 #define MAX_CHUNKS 20	//any more than this is suspicious
 #define OPCODE_LEN 3	//"SPn"
+
+const unsigned default_order[] = {3,4,5,6,7,1,2,0};	//good for HP 4195A
 
 // hax, get file length but restore position
 u32 flen(FILE *hf) {
@@ -125,8 +129,68 @@ badchunks:
 	return NULL;
 }
 
-static void reorder(FILE *ifile, FILE *outf) {
+/** Parse source and write all chunks of specified pen.
+ *
+ * @param pchunks : describes all chunks in src buffer
+ * @param pen : 0 to MAX_PEN
+ *
+ * @return 1 if ok
+ */
+static bool lift_chunk(FILE *outf, const u8 *src, const struct pen_chunk *pchunks, unsigned pen) {
+	unsigned idx;
+	for (idx=0; idx < MAX_CHUNKS; idx++) {
+		if (pchunks[idx].len == 0) {
+			//done
+			break;
+		}
+		unsigned start, clen, curpen;
+		curpen = pchunks[idx].pen;
+		if (pen != curpen) {
+			//skip these for now
+			continue;
+		}
+		start = pchunks[idx].start;
+		clen = pchunks[idx].len;
+		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
+			printf("SPx: fwrite err\n");
+			return 0;
+		}
+		printf("wrote %u bytes of SP%u\n", clen, pen);
+	}
+	return 1;
+}
+
+/** reorder chunks from ifile into outf, according to specified order
+ *
+ * @param neworder array of up to MAX_PEN+1 numbers. Last elements are drawn last, on top. Last pen must be 0 !
+ *
+ */
+static void reorder(FILE *ifile, FILE *outf, const unsigned neworder[MAX_PEN+1] ) {
 	u32 file_len;
+
+	// Check for duplicates and 0 termination in new order
+	bool checklist[MAX_PEN+1] = {0};
+	unsigned idx;
+	for (idx=0; idx <= MAX_PEN; idx++) {
+		unsigned curpen = neworder[idx];
+		if (curpen > MAX_PEN) {
+			printf("Invalid pen %u specified ?\n", curpen);
+			return;
+		}
+		if (checklist[curpen]) {
+			printf("Duplicate pen %u ?\n", curpen);
+			return;
+		}
+		checklist[curpen] = 1;
+		if (curpen ==0) {
+			//done
+			break;
+		}
+	}
+	if (!checklist[0]) {
+		printf("Unterminated pen ordering ?\n");
+		return;
+	}
 
 	rewind(ifile);
 	file_len = flen(ifile);
@@ -153,10 +217,7 @@ static void reorder(FILE *ifile, FILE *outf) {
 		goto freebufs;
 	}
 
-	/************ hardcoded bit to output all non-0 & background pens first ****
-	* this could use some sorting magic, maybe
-	*/
-	//but first, header
+	// first, write header
 	if (pchunks[0].len == 0) {
 		printf("bad chunk 0\n");
 		goto freebufs;
@@ -167,69 +228,17 @@ static void reorder(FILE *ifile, FILE *outf) {
 		goto freebufs;
 	}
 
-	unsigned idx;
-
-	//first loop : write most chunks
-	#define IS_TOP_PEN(x) (((x) == 1) || ((x) == 2))
-	for (idx=0; idx < MAX_CHUNKS; idx++) {
-		if (pchunks[idx].len == 0) {
-			//done
-			break;
-		}
-		unsigned start, clen, pen;
-		pen = pchunks[idx].pen;
-		if ((pen == 0) || IS_TOP_PEN(pen)) {
-			//skip these for now
-			continue;
-		}
-		start = pchunks[idx].start;
-		clen = pchunks[idx].len;
-		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
-			printf("SPx: fwrite err\n");
+	//write chunks in order, SP0 last naturally since it serves as list terminator
+	for (idx = 0; idx <= MAX_PEN; idx++) {
+		bool rv=lift_chunk(outf, src, pchunks, neworder[idx]);
+		if (!rv) {
+			//subfunction already printed error msg
 			goto freebufs;
 		}
-		printf("wrote %u bytes of SP%u\n", clen, pen);
-	}
-
-	//second loop : write top layers
-	for (idx=0; idx < MAX_CHUNKS; idx++) {
-		if (pchunks[idx].len == 0) {
-			//done
+		if (neworder[idx] == 0) {
+			//all done
 			break;
 		}
-		unsigned start, clen, pen;
-		pen = pchunks[idx].pen;
-		if ((pen == 0) || !IS_TOP_PEN(pen)) {
-			//skip SP0 and non-toplayer pens
-			continue;
-		}
-		start = pchunks[idx].start;
-		clen = pchunks[idx].len;
-		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
-			printf("SPy: fwrite err\n");
-			goto freebufs;
-		}
-		printf("wrote %u bytes of SP%u\n", clen, pen);
-	}
-
-	//last loop : write SP0 chunk (chunks ?) / terminator at the end.
-	for (idx=0; idx < MAX_CHUNKS; idx++) {
-		if (pchunks[idx].len == 0) {
-			//done
-			break;
-		}
-		unsigned start, clen, pen;
-		pen = pchunks[idx].pen;
-		if (pen != 0) {
-			continue;
-		}
-		start = pchunks[idx].start;
-		clen = pchunks[idx].len;
-		if (fwrite(&src[start], 1, clen, outf) !=  clen) {
-			printf("SP0: fwrite err\n");
-			goto freebufs;
-		}
-		printf("wrote %u bytes of SP%u\n", clen, pen);
 	}
 
 freebufs:
@@ -244,10 +253,12 @@ freebufs:
 static void usage(void)
 {
 	fprintf(stderr, "usage:\n"
-		"reorder <in_file> <out_file>\n"
+		"reorder <in_file> <out_file> [-r PPP...]\n"
 		"Or specify filenames explicitly with\n"
 		"\t-i <filename>\tinput PLT file\n"
 		"\t-o <filename>\toutput PLT file\n"
+		"Optional argument -r to specify pen ordering; default 3456712.\n"
+		"e.g. \"-r 3412\" will output pens 3,4,1,2, with pen 2 last (on top).\n"
 		"");
 }
 
@@ -257,11 +268,13 @@ int main(int argc, char * argv[]) {
 	int index;
 	FILE *ifile = NULL;
 	FILE *ofile = NULL;
+	unsigned ordering[MAX_PEN + 1];
+	unsigned order_idx = 0;
 
 	printf(	"**** %s\n"
 		"**** (c) 2021 fenugrec\n", argv[0]);
 
-	while((c = getopt(argc, argv, "i:o:h")) != -1) {
+	while((c = getopt(argc, argv, "i:o:r:h")) != -1) {
 		switch(c) {
 		case '?':
 			//fallthrough
@@ -290,6 +303,35 @@ int main(int argc, char * argv[]) {
 				goto bad_exit;
 			}
 			break;
+		case 'r':
+			{
+			//parse something like "456712" => {4,5,6,7,1,2,0} (append 0 if missing)
+			unsigned cur;
+			for (cur=0; optarg[cur] != 0; cur++) {
+				if (order_idx == MAX_PEN) {
+					fprintf(stderr, "too many pens !\n");
+					goto bad_exit;
+				}
+				if (!isdigit(optarg[cur])) {
+					fprintf(stderr, "bad pen number, not a digit\n");
+					goto bad_exit;
+				}
+				unsigned digit = optarg[cur] - '0';
+				if (digit > MAX_PEN) {
+					fprintf(stderr, "bad pen number %u > %u\n", digit, MAX_PEN);
+					goto bad_exit;
+				}
+				if (digit == 0) {
+					fprintf(stderr, "do not specify pen 0 (last pen)\n");
+					goto bad_exit;
+				}
+				ordering[order_idx++] = digit;
+				//we'll check for dupes etc later
+			}
+			//ensure 0 pen at the end
+			ordering[order_idx] = 0;
+			break;
+			}
 		default:
 			usage();
 			goto bad_exit;
@@ -329,7 +371,12 @@ int main(int argc, char * argv[]) {
 		goto bad_exit;
 	}
 
-	reorder(ifile, ofile);
+	const unsigned *neworder = default_order;
+	if (order_idx > 0) {
+		// an ordering was specified : use that
+		neworder = ordering;
+	}
+	reorder(ifile, ofile, neworder);
 
 goodexit:
 	if (ifile) {

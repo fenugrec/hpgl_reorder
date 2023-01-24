@@ -142,7 +142,7 @@ badchunks:
  */
 static bool lift_chunk(FILE *outf, const u8 *src, const struct pen_chunk *pchunks, unsigned pen) {
 	unsigned idx;
-	const char *pu_opcode="PU;";
+	const char pu_opcode[]="PU;";
 
 	for (idx=0; idx < MAX_CHUNKS; idx++) {
 		if (pchunks[idx].len == 0) {
@@ -161,7 +161,7 @@ static bool lift_chunk(FILE *outf, const u8 *src, const struct pen_chunk *pchunk
 			printf("SPx: fwrite err\n");
 			return 0;
 		}
-		if (fwrite(pu_opcode, 1, sizeof(pu_opcode), outf) !=  sizeof(pu_opcode)) {
+		if (fwrite(pu_opcode, 1, ARRAY_SIZE(pu_opcode), outf) !=  ARRAY_SIZE(pu_opcode)) {
 			printf("PU: fwrite err\n");
 			return 0;
 		}
